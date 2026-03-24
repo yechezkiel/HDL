@@ -1,1 +1,171 @@
+#include <reg51.h>
+#include <stdio.h>
 
+// ADC Pin Definitions (ADC0808/0809)
+sbit ale = P3^3;
+sbit oe  = P3^6;
+sbit soc = P3^4; 
+sbit eoc = P3^5;
+sbit clk = P3^7;
+
+// ADC Channel Select
+sbit ADDA = P3^0;   
+sbit ADDB = P3^1;
+sbit ADDC = P3^2;
+
+// LCD Pin Definitions (4-bit Mode on Port 2)
+// Hardware: D4-D7 of LCD -> P2.4-P2.7
+sbit rs = P2^0;
+sbit en = P2^1;
+sbit rw = P2^2;
+
+#define input_port P1   // ADC Data Input Port (8-bit)
+
+char result[10]; 
+unsigned int number;
+
+/* Timer 0 Interrupt for ADC Clock (~500kHz) */
+void timer0() interrupt 1
+{
+    clk = ~clk;
+}
+
+void delay(unsigned int count)
+{
+    unsigned int i, j;
+    for(i = 0; i < count; i++)
+        for(j = 0; j < 100; j++);
+}
+
+/* --- Improved LCD Functions --- */
+
+void pulse_en()
+{
+    en = 1;
+    delay(1);
+    en = 0;
+    delay(1); 
+}
+
+void lcd_send(unsigned char ch, unsigned char type)
+{
+    rs = type; // 0 for Command, 1 for Data
+    rw = 0;
+
+    // Send High Nibble (D7-D4)
+    P2 = (P2 & 0x0F) | (ch & 0xF0); 
+    pulse_en();
+
+    // Send Low Nibble (D3-D0)
+    P2 = (P2 & 0x0F) | (ch << 4 & 0xF0); 
+    pulse_en();
+}
+
+void lcdcmd(unsigned char ch) { lcd_send(ch, 0); }
+void lcd_data(unsigned char ch) { lcd_send(ch, 1); }
+
+void lcdprint(unsigned char *str)
+{
+    while(*str)
+    { 
+        lcd_data(*str);
+        str++;
+    }
+}
+
+void lcd_ini()
+{
+    delay(20);
+    lcdcmd(0x33); // Initialization sequence for 4-bit
+    lcdcmd(0x32); 
+    lcdcmd(0x28); // 2 lines, 5x7 matrix, 4-bit mode
+    lcdcmd(0x0C); // Display ON, Cursor OFF
+    lcdcmd(0x06); // Increment Cursor
+    lcdcmd(0x01); // Clear Display
+}
+
+/* --- Voltage Display Logic --- */
+
+void show()
+{
+    unsigned long voltage_mv;
+    unsigned int whole, decimal;
+
+    // Formula: (ADC_Value * 5.00V) / 255
+    voltage_mv = (number * 500UL) / 255; 
+
+    whole = (unsigned int)(voltage_mv / 100);    
+    decimal = (unsigned int)(voltage_mv % 100);  
+
+    sprintf(result, "%u.%02uV", whole, decimal); 
+    lcdprint(result);
+}
+
+void read_adc()
+{
+    ale = 1; soc = 1;
+    delay(1);
+    ale = 0; soc = 0;
+    while(eoc == 1); 
+    while(eoc == 0); 
+    oe = 1;          
+    delay(1);
+    number = input_port;
+    delay(1);
+    oe = 0;          
+}
+
+void adc(int i)
+{
+    switch(i)
+    {
+        case 0:
+            ADDC = 0; ADDB = 0; ADDA = 0;
+            lcdcmd(0xC0); // Line 2, Pos 1
+            read_adc();
+            show();
+            break;
+        case 1:
+            ADDC = 0; ADDB = 0; ADDA = 1;
+            lcdcmd(0xC5); // Line 2, Pos 6
+            read_adc();
+            show();
+            break;
+        case 2:
+            ADDC = 0; ADDB = 1; ADDA = 0;
+            lcdcmd(0xCA); // Line 2, Pos 11
+            read_adc();
+            show();
+            break;
+    }
+}
+
+void main()
+{
+    // Initialize Pins
+    eoc = 1; ale = 0; oe  = 0; soc = 0;
+    input_port = 0xFF; // Set P1 as input
+
+    // Timer Setup for ADC Clock
+    TMOD = 0x02;    
+    TH0  = 0xFD;    
+    
+    lcd_ini();
+    lcdprint("Volt Meter 3Ch");
+    delay(1000);
+    lcdcmd(0x01);
+    lcdprint("Ch1  Ch2  Ch3");
+
+    IE = 0x82;      
+    TR0 = 1;        
+
+    while(1)
+    {
+        int i;
+        for(i = 0; i < 3; i++)
+        {
+            adc(i);
+            delay(50); 
+        }
+    }
+}
