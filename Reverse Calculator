@@ -1,0 +1,8 @@
+a=float(input("Enter result: "))
+import random as r
+d=int(input("Max digits per operand: "))
+b1=r.randint(1,10**d-1);b2=r.randint(1,10**d-1);b3=r.randint(1,10**d-1);b4=r.randint(1,10**d-1)
+print(f"{a-b1}+{b1}={a}")
+print(f"{a+b2}-{b2}={a}")
+print(f"{a/b3:.2f}*{b3}={a:.2f}")
+print(f"{a*b4}/{b4}={a:.2f}")
